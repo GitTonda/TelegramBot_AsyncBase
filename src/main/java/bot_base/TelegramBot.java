@@ -1,7 +1,10 @@
 package bot_base;
 
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
+import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.Update;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
+
 import java.util.concurrent.*;
 
 public class TelegramBot extends TelegramLongPollingBot
@@ -9,50 +12,59 @@ public class TelegramBot extends TelegramLongPollingBot
     /**
      * <h3>Constants</h3>
      * <p>- <strong>THREAD_CAP</strong>: defines how many concurrent threads can exist at the same time<br>
-     * - <strong>QUEUE_CAP</strong>: defines how many Update objs can fit into the queue at the same time</p>
+     * - <strong>QUEUE_CAP</strong>: defines how many Update objs can fit into the queue at the same time<br>
+     * - <strong>USER_COOLDOWN_MS</strong>: defines how many ms have to pass between an update and the next</p>
      * <h3>Dynamic Variables</h3>
      * <p>- <strong>bot_username</strong>: the name given to the bot; default method of TelegramLongPollingBot<br>
      * - <strong>executor</strong>: the thread handler for async update processing<br>
-     * - <strong>updates_queue</strong>: queue containing all updates received from the bot, waiting for processing</p>
+     * - <strong>updates_queue</strong>: queue containing all updates received from the bot, waiting for processing<br>
+     * - <strong>user_locks</strong>: hashmap to map users to updates, so that only one update per user is being
+     * processed at the time</p>
      */
-    private static final int THREAD_CAP = 50, QUEUE_CAP = 1000;
+    private static final int THREAD_CAP = 50, QUEUE_CAP = 1000, USER_COOLDOWN_MS = 1000;
     String bot_username;
     ExecutorService executor;
     LinkedBlockingQueue<Update> updates_queue;
+    ConcurrentHashMap<Long, Object> user_locks;
+    ConcurrentHashMap<Long, Long> last_update_time;
 
     /**
      *
      * @param bot_username name of the bot
-     * @param bot_token telegram token of the bot
-     *
+     * @param bot_token    telegram token of the bot
      * @implNote constructor for TelegramBot: initializes the ExecutorService and the LinkedBlockingQueue
      */
-    public TelegramBot(String bot_username, String bot_token)
+    public TelegramBot (String bot_username, String bot_token)
     {
         super(bot_token);
         this.bot_username = bot_username;
         executor = Executors.newFixedThreadPool(THREAD_CAP);
         updates_queue = new LinkedBlockingQueue<>(QUEUE_CAP);
+        user_locks = new ConcurrentHashMap<>();
+        last_update_time = new ConcurrentHashMap<>();
 
         // Preparing Threads
-        executor.submit(() ->
+        for (int i = 0; i < THREAD_CAP; i++)
         {
-            while (!Thread.currentThread().isInterrupted())
+            executor.submit(() ->
             {
-                try
+                while (! Thread.currentThread().isInterrupted())
                 {
-                    // if there is an update in the queue, it is forwarded to the update_handler;
-                    // thread is blocked otherwise, until a new update is added to the queue
-                    update_handler(updates_queue.take());
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+                    try
+                    {
+                        update_handler(updates_queue.take());
+                    }
+                    catch (InterruptedException e)
+                    {
+                        Thread.currentThread().interrupt();
+                    }
                 }
-            }
-        });
+            });
+        }
     }
 
     @Override
-    public String getBotUsername()
+    public String getBotUsername ()
     {
         return bot_username;
     }
@@ -60,14 +72,19 @@ public class TelegramBot extends TelegramLongPollingBot
     /**
      *
      * @param update Update obj received from the bot
-     *
      * @implNote add the update to the update_queue, for the executor to process
      */
     @Override
-    public void onUpdateReceived(Update update) {
-        try {
-            updates_queue.put(update);
-        } catch (InterruptedException e) {
+    public void onUpdateReceived (Update update)
+    {
+        try
+        {
+            // if queue is full, every update waits 100ms, then is dropped in favour of a new one
+            if (! updates_queue.offer(update, 100, TimeUnit.MILLISECONDS))
+                System.out.println("Dropped update: " + update.getUpdateId());
+        }
+        catch (InterruptedException e)
+        {
             Thread.currentThread().interrupt();
         }
     }
@@ -75,12 +92,85 @@ public class TelegramBot extends TelegramLongPollingBot
     /**
      *
      * @param update Update received from the Bot
-     *
-     * @implNote at this point in the code the update is ready to be handled
      */
-    private void update_handler(Update update)
+    private void update_handler (Update update)
     {
-        System.out.println("Updates: " + update.getUpdateId());
-        // add your input handler code here
+        // Check if update comes from user (just in case)
+        Long user_id = get_user_id(update);
+        if (user_id == null)
+        {
+            System.out.println("Unknown user, skipping update.");
+            return;
+        }
+
+        // Rate-limiting check
+        // for every update per user, if less than 1000ms have passed, it's dropped
+        long now = System.currentTimeMillis();
+        long last = last_update_time.getOrDefault(user_id, 0L);
+        if (now - last < USER_COOLDOWN_MS)
+        {
+            System.out.println("User " + user_id + " is sending updates too fast. Dropping update: " + update.getUpdateId());
+            send_toast(update, "Clicked too fast. Slow down...");
+            return;
+        }
+        last_update_time.put(user_id, now);
+
+        // User lock
+        // doesn't allow an update to be processed unless the previous one is complete
+        Object lock = new Object();
+        Object existing = user_locks.putIfAbsent(user_id, lock);
+        if (existing != null)
+        {
+            System.out.println("User " + user_id + " already has an update in progress. Dropping update: " + update.getUpdateId());
+            send_toast(update, "Update is being processed. Slow down...");
+            return;
+        }
+        try
+        {
+            System.out.println("Processing update from user: " + user_id);
+            // TODO add update handler method
+        }
+        finally
+        {
+            user_locks.remove(user_id);
+        }
+    }
+
+    /**
+     *
+     * @param update Update obj
+     * @return the user_id extracted from the update
+     */
+    private Long get_user_id (Update update)
+    {
+        if (update.hasMessage()) return update.getMessage().getFrom().getId();
+        if (update.hasCallbackQuery()) return update.getCallbackQuery().getFrom().getId();
+        return null;
+    }
+
+    /**
+     *
+     * @param update Update obj
+     * @param text   Message of the toast
+     */
+    private void send_toast (Update update, String text)
+    {
+        // If update is a callback query we can send a toast to warn the user about something
+        try
+        {
+            String callbackId = update.hasCallbackQuery() ? update.getCallbackQuery().getId() : null;
+            if (callbackId != null)
+            {
+                AnswerCallbackQuery toast = new AnswerCallbackQuery();
+                toast.setCallbackQueryId(callbackId);
+                toast.setShowAlert(false);
+                toast.setText(text);
+                execute(toast);
+            }
+        }
+        catch (TelegramApiException e)
+        {
+            throw new RuntimeException();
+        }
     }
 }
