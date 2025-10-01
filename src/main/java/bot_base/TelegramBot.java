@@ -7,6 +7,11 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 import java.util.concurrent.*;
 
+/**
+ * TODO add logging via SLF4J
+ * TODO implement graceful shutdown (executor.shutdown() on SIGINT)
+ */
+
 public class TelegramBot extends TelegramLongPollingBot
 {
     /**
@@ -19,7 +24,8 @@ public class TelegramBot extends TelegramLongPollingBot
      * - <strong>executor</strong>: the thread handler for async update processing<br>
      * - <strong>updates_queue</strong>: queue containing all updates received from the bot, waiting for processing<br>
      * - <strong>user_locks</strong>: hashmap to map users to updates, so that only one update per user is being
-     * processed at the time</p>
+     * processed at the time<br>
+     * - <strong>async_executor</strong>: helper structure to allow async processes to run into the |update handler|</p>
      */
     private static final int THREAD_CAP = 50, QUEUE_CAP = 1000, USER_COOLDOWN_MS = 1000;
     String bot_username;
@@ -27,6 +33,8 @@ public class TelegramBot extends TelegramLongPollingBot
     LinkedBlockingQueue<Update> updates_queue;
     ConcurrentHashMap<Long, Object> user_locks;
     ConcurrentHashMap<Long, Long> last_update_time;
+    ExecutorService async_executor; // or fixed
+
 
     /**
      *
@@ -42,6 +50,7 @@ public class TelegramBot extends TelegramLongPollingBot
         updates_queue = new LinkedBlockingQueue<>(QUEUE_CAP);
         user_locks = new ConcurrentHashMap<>();
         last_update_time = new ConcurrentHashMap<>();
+        async_executor = Executors.newCachedThreadPool();
 
         // Preparing Threads
         for (int i = 0; i < THREAD_CAP; i++)
@@ -125,10 +134,21 @@ public class TelegramBot extends TelegramLongPollingBot
             send_toast(update, "Update is being processed. Slow down...");
             return;
         }
+
+        // Finally processing user update
+        // This structure makes the current thread wait for the update to be done processing, even if
+        // it contains async thread creation
+        CompletableFuture<Void> future = CompletableFuture.runAsync(() ->
+        {
+            // TODO new UpdateHandler(this, update).handle;
+        }, async_executor);
         try
         {
-            System.out.println("Processing update from user: " + user_id);
-            // TODO add update handler method
+            future.get();
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
         }
         finally
         {
