@@ -6,6 +6,7 @@ import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
 
 public class Main
 {
+    /// <h2>Add your bot's data here</h2>
     private static final String
             bot_username = "",
             bot_token = "";
