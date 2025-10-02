@@ -27,7 +27,7 @@ public class TelegramBot extends TelegramLongPollingBot
      * processed at the time<br>
      * - <strong>async_executor</strong>: helper structure to allow async processes to run into the |update handler|</p>
      */
-    private static final int THREAD_CAP = 50, QUEUE_CAP = 1000, USER_COOLDOWN_MS = 1000;
+    private final int USER_COOLDOWN_MS;
     String bot_username;
     ExecutorService executor;
     LinkedBlockingQueue<Update> updates_queue;
@@ -44,7 +44,15 @@ public class TelegramBot extends TelegramLongPollingBot
      */
     public TelegramBot (String bot_username, String bot_token)
     {
+        // super constructor
         super(bot_token);
+
+        // class constants
+        final int THREAD_CAP = Integer.parseInt(ConfigLoader.get("THREAD_CAP"));
+        final int QUEUE_CAP = Integer.parseInt(ConfigLoader.get("QUEUE_CAP"));
+        USER_COOLDOWN_MS = Integer.parseInt(ConfigLoader.get("USER_COOLDOWN_MS"));
+
+        // class variables
         this.bot_username = bot_username;
         executor = Executors.newFixedThreadPool(THREAD_CAP);
         updates_queue = new LinkedBlockingQueue<>(QUEUE_CAP);
