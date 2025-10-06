@@ -26,10 +26,10 @@ public class ConfigLoader
 
     /**
      *
-     * @param key string that contains requested property
+     * @param key string that contains the requested property
      * @return the property in String
      */
-    public static String get (String key)
+    public static String get(String key)
     {
         return properties.getProperty(key);
     }

@@ -42,7 +42,7 @@ public class TelegramBot extends TelegramLongPollingBot
      * @param bot_token    telegram token of the bot
      * @implNote constructor for TelegramBot: initializes the ExecutorService and the LinkedBlockingQueue
      */
-    public TelegramBot (String bot_username, String bot_token)
+    public TelegramBot(String bot_username, String bot_token)
     {
         // super constructor
         super(bot_token);
@@ -65,7 +65,7 @@ public class TelegramBot extends TelegramLongPollingBot
         {
             executor.submit(() ->
             {
-                while (! Thread.currentThread().isInterrupted())
+                while (!Thread.currentThread().isInterrupted())
                 {
                     try
                     {
@@ -81,7 +81,7 @@ public class TelegramBot extends TelegramLongPollingBot
     }
 
     @Override
-    public String getBotUsername ()
+    public String getBotUsername()
     {
         return bot_username;
     }
@@ -89,15 +89,15 @@ public class TelegramBot extends TelegramLongPollingBot
     /**
      *
      * @param update Update obj received from the bot
-     * @implNote add the update to the update_queue, for the executor to process
+     * @implNote add the update to the update_queue for the executor to process
      */
     @Override
-    public void onUpdateReceived (Update update)
+    public void onUpdateReceived(Update update)
     {
         try
         {
-            // if queue is full, every update waits 100ms, then is dropped in favour of a new one
-            if (! updates_queue.offer(update, 100, TimeUnit.MILLISECONDS))
+            // if the queue is full, every update waits 100 ms, then is dropped in favor of a new one
+            if (!updates_queue.offer(update, 100, TimeUnit.MILLISECONDS))
                 System.out.println("Dropped update: " + update.getUpdateId());
         }
         catch (InterruptedException e)
@@ -110,7 +110,7 @@ public class TelegramBot extends TelegramLongPollingBot
      *
      * @param update Update received from the Bot
      */
-    private void update_handler (Update update)
+    private void update_handler(Update update)
     {
         // Check if update comes from user (just in case)
         Long user_id = get_user_id(update);
@@ -121,7 +121,7 @@ public class TelegramBot extends TelegramLongPollingBot
         }
 
         // Rate-limiting check
-        // for every update per user, if less than 1000ms have passed, it's dropped
+        // for every update per user, if less than 1000 ms have passed, it's dropped
         long now = System.currentTimeMillis();
         long last = last_update_time.getOrDefault(user_id, 0L);
         if (now - last < USER_COOLDOWN_MS)
@@ -143,7 +143,7 @@ public class TelegramBot extends TelegramLongPollingBot
             return;
         }
 
-        // Finally processing user update
+        // Finally, processing user update
         // This structure makes the current thread wait for the update to be done processing, even if
         // it contains async thread creation
         CompletableFuture<Void> future = CompletableFuture.runAsync(() ->
@@ -169,7 +169,7 @@ public class TelegramBot extends TelegramLongPollingBot
      * @param update Update obj
      * @return the user_id extracted from the update
      */
-    private Long get_user_id (Update update)
+    private Long get_user_id(Update update)
     {
         if (update.hasMessage()) return update.getMessage().getFrom().getId();
         if (update.hasCallbackQuery()) return update.getCallbackQuery().getFrom().getId();
@@ -181,9 +181,9 @@ public class TelegramBot extends TelegramLongPollingBot
      * @param update Update obj
      * @param text   Message of the toast
      */
-    private void send_toast (Update update, String text)
+    private void send_toast(Update update, String text)
     {
-        // If update is a callback query we can send a toast to warn the user about something
+        // If update is a callback query, we can send a toast to warn the user about something
         try
         {
             String callbackId = update.hasCallbackQuery() ? update.getCallbackQuery().getId() : null;
